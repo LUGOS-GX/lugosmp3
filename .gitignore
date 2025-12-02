@@ -1,0 +1,19 @@
+# Archivos grandes y binarios
+ffmpeg/
+downloads/
+__pycache__/
+*.pyc
+*.mp3
+*.mp4
+*.webm
+.env
+instance/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Entornos virtuales
+.venv/
+venv/
+env/
