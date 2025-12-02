@@ -16,6 +16,31 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 * 1024  # 16GB max file size
 if not os.path.exists(app.config['DOWNLOAD_FOLDER']):
     os.makedirs(app.config['DOWNLOAD_FOLDER'])
 
+import stat
+
+def fix_executable_permissions():
+    """Dar permisos de ejecución a binarios de yt-dlp"""
+    try:
+        # Buscar binarios de yt-dlp
+        import site
+        import yt_dlp
+        
+        # Obtener ubicación de yt-dlp
+        yt_dlp_path = os.path.dirname(yt_dlp.__file__)
+        
+        # Dar permisos a posibles binarios
+        for root, dirs, files in os.walk(yt_dlp_path):
+            for file in files:
+                if 'ffmpeg' in file.lower() or 'ffprobe' in file.lower():
+                    file_path = os.path.join(root, file)
+                    os.chmod(file_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+                    print(f"✅ Permisos arreglados para: {file_path}")
+    except Exception as e:
+        print(f"⚠️  No se pudieron arreglar permisos: {e}")
+
+# Llamar al inicio
+fix_executable_permissions()
+
 def setup_ffmpeg():
     """Para deployment - confía en yt-dlp o FFmpeg del sistema"""
     print(" Configurando para deployment...")
@@ -180,20 +205,66 @@ class DownloadManager:
                 'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
                 'quiet': False,
                 'no_warnings': False,
+                 # Configuración para cloud
+                'nocheckcertificate': True,
+                'ignoreerrors': True,
+                'nooverwrites': True,
+                'noprogress': True,
             }
 
             if format_type == 'mp3':
-                # Configuración para MP3 - yt-dlp usa su FFmpeg interno
-                ydl_opts.update({
-                    'format': 'bestaudio/best',
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': quality,
-                    }],
-                })
-                print(f"🎵 Descargando MP3 a {quality}kbps")
+                print(f"🎵 Intentando descargar MP3 (calidad: {quality}kbps)")
             
+                # PRIMERO intentar con FFmpeg
+                try:
+                    ydl_opts.update({
+                        'format': 'bestaudio/best',
+                        'postprocessors': [{
+                            'key': 'FFmpegExtractAudio',
+                            'preferredcodec': 'mp3',
+                            'preferredquality': quality,
+                        }],
+                    })
+                    
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        downloaded_files = os.listdir(download_path)
+                    
+                    # Buscar archivo .mp3
+                    mp3_file = None
+                    for file in downloaded_files:
+                        if file.endswith('.mp3'):
+                            mp3_file = os.path.join(download_path, file)
+                            break
+                
+                    if mp3_file:
+                        print(f"✅ MP3 creado exitosamente: {mp3_file}")
+                    else:
+                        raise Exception("No se creó archivo MP3")
+                    
+                except Exception as e:
+                    print(f"⚠️  FFmpeg falló, intentando descarga directa: {e}")
+                
+                    # SEGUNDO intento: Descargar audio directamente
+                    ydl_opts_alt = {
+                        'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+                        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                        'quiet': False,
+                    }
+                
+                    with yt_dlp.YoutubeDL(ydl_opts_alt) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        downloaded_files = os.listdir(download_path)
+                
+                    # Renombrar .m4a a .mp3
+                    for file in downloaded_files:
+                        if file.endswith('.m4a'):
+                            m4a_file = os.path.join(download_path, file)
+                            mp3_file = m4a_file.replace('.m4a', '.mp3')
+                            os.rename(m4a_file, mp3_file)
+                            print(f"✅ Convertido .m4a a .mp3: {mp3_file}")
+                            break
+                    
             else:
                 # Configuración para MP4 (no necesita FFmpeg)
                 ydl_opts.update({
